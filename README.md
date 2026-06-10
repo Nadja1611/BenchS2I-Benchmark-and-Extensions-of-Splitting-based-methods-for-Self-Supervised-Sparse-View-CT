@@ -38,7 +38,7 @@ utils_lodopab.py
 
 ```
 git clone https://github.com/Nadja1611/BenchS2I-Benchmark-and-Extensions-of-Splitting-based-methods-for-Self-Supervised-Sparse-View-CT.git
-cd Benchs2i
+cd BenchS2I-Benchmark-and-Extensions-of-Splitting-based-methods-for-Self-Supervised-Sparse-View-CT
 ```
 
 ### 2. Download the dataset
