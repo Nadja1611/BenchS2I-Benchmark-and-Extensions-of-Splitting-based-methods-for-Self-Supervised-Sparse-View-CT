@@ -166,7 +166,7 @@ for method in "${methods[@]}"; do
 
         echo "Running: method=$method grid=$grid angles=$ang noise=$ni"
 
-        python inference_uncorrelated.py \
+        python inference.py \
             --method "$method" \
             --grid_size "$grid" \
             --angles "$ang" \
