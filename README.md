@@ -151,6 +151,8 @@ python run_doublesplit.py \
 ## 🔍 Inference
 
 After training, run inference using:
+```bash
+
 methods=( "S2I" "P2P")
 grid_sizes=(2 3 4)
 angles_list=(16 32)
@@ -178,7 +180,7 @@ for method in "${methods[@]}"; do
     done
   done
 done
-
+```
 ---
 
 ## 📖 Citation
