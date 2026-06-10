@@ -10,20 +10,20 @@ It includes standardized experimental setups based on the **LoDoPaB-CT dataset**
 
 ---
 
-## 📦 Dataset Overview
+##  Dataset Overview
 
 The experiments are based on the **LoDoPaB-CT Dataset**.
 
 Download the dataset here:  
-👉 https://zenodo.org/records/3384092
+ https://zenodo.org/records/3384092
 
-### 📌 Data Source
+###  Data Source
 
 The dataset is derived from clinical CT scans, converted to `.pt` files for efficient training and evaluation. The repository includes scripts to process the LoDoPaB-CT testing split into training and test sets.
 
 ---
 
-## 📁 Repository Structure
+##  Repository Structure
 
 ```text
 BenchS2I/
@@ -39,7 +39,7 @@ BenchS2I/
 
 ---
 
-## 🚀 Getting Started
+##  Getting Started
 
 ### 1. Clone the repository
 
@@ -61,7 +61,7 @@ Then convert `.hdf5` files to `.pt` files if needed (see `utils_lodopab.py`).
 
 ---
 
-## 🏋️ Training
+##  Training
 
 ### Common arguments
 
@@ -82,7 +82,7 @@ Then convert `.hdf5` files to `.pt` files if needed (see `utils_lodopab.py`).
 
 ---
 
-### 1️⃣ Angular Splitting (S2I)
+### 1️ Angular Splitting (S2I)
 
 Example:
 
@@ -97,7 +97,7 @@ python run.py \
 
 ---
 
-### 2️⃣ Latttice Splitting (P2P)
+### 2️ Latttice Splitting (P2P)
 
 Example:
 
@@ -113,7 +113,7 @@ python run.py \
 
 ---
 
-### 3️⃣ Joint Angular + Detector Splitting (DoubleSplit / S2I_ds)
+### 3️ Joint Angular + Detector Splitting (DoubleSplit / S2I_ds)
 
 Example:
 
@@ -133,7 +133,7 @@ python run_doublesplit.py \
 
 ---
 
-## 🔊 Example: Correlated Noise with Interpolation
+##  Example: Correlated Noise with Interpolation
 
 ```bash
 python run_doublesplit.py \
@@ -148,7 +148,7 @@ python run_doublesplit.py \
 
 ---
 
-## 🔍 Inference
+##  Inference
 
 After training, run inference using:
 ```bash
