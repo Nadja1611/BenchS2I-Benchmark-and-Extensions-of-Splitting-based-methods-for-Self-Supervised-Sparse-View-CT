@@ -37,7 +37,7 @@ utils_lodopab.py
 ### 1. Clone the repository
 
 ```
-git clone https://github.com/your-username/Benchs2i.git
+git clone https://github.com/Nadja1611/BenchS2I-Benchmark-and-Extensions-of-Splitting-based-methods-for-Self-Supervised-Sparse-View-CT/edit/main/README.md)
 cd Benchs2i
 ```
 
