@@ -3,7 +3,7 @@
 **BenchS2I** is a benchmark and research framework for evaluating and extending **splitting-based self-supervised learning methods for sparse-view CT reconstruction**. The repository provides implementations of:
 
 - **S2I** – angular splitting  
-- **P2P** – detector (lattice) splitting  
+- **P2P** – lattice splitting  
 - **S2I_ds** – joint angular + detector splitting (DoubleSplit)  
 
 It includes standardized experimental setups based on the **LoDoPaB-CT dataset**, with support for various noise models, interpolation, and flexible loss functions.
