@@ -166,7 +166,12 @@ parser.add_argument(
     help = "1 to show images and 0 to save them",
     default = False)
 
-
+parser.add_argument(
+    "-use_2detect",
+    "--use_2detect",
+    type = bool,
+    help = "do we work with 2detect data?",
+    default = True)
 
 parser.add_argument(
     "-i", "--fill_zeros",
@@ -188,6 +193,8 @@ parser.add_argument(
     help="number of images used for training",
     default = 1000)
 
+
+
 '>>-------------------------------------------------------------------------<<'
 ' Parse arguments and set random seed'
 '>>-------------------------------------------------------------------------<<'
@@ -203,28 +210,42 @@ batch_size = args.batch_size
 n_img = args.number_training_imgs
 
 print('correlated noise ', args.correlated_noise, flush = True)
+print('random and fill', args.random_mask, args.fill_zeros, flush = True)
 
 '>>-------------------------------------------------------------------------<<'
 ' Loading and augmenting image data. Computing sinograms'
 '>>-------------------------------------------------------------------------<<'
+if args.use_2detect:
+    path_reco = r"/home/johannes/data_2detect/all_reconstructions"
+    images = load_reconstructions_to_tensor(path_reco)
+    images_training = images[:200]
+    images_test = images[200:240]
+    del(images)
+    print('NR of images ', images_training.shape, images_test.shape, flush = True)
+    path_sinos = r"/home/johannes/data_2detect/all_sinograms"
+    sinograms = load_sinograms_to_tensor(path_sinos, nr_angles = args.angles)
+    sinograms = sinograms.unsqueeze(1)
+    print(sinograms.shape, flush = True)
+    
+    sinograms_test = sinograms[200:240]
+    sinograms = sinograms[:200]
+else:
+    path = r"/home/nadja/Documents/Projects/gt_pt"
+    images = get_images_from_pt(path, amount_of_images='all', scale_number=1)
+    images = rescale_images(images, device, target_size = (np.shape(images)[0],336,336))
+    print(images.shape, flush = True)
+    #### we ha e 3584 images in total
+    print(n_img)
+    images_training = images[584:584+n_img]
+    images_test = images[400:584]
 
-print('random and fill', args.random_mask, args.fill_zeros, flush = True)
-path = r"/home/nadja/Documents/Projects/gt_pt"
-images = get_images_from_pt(path, amount_of_images='all', scale_number=1)
-images = rescale_images(images, device, target_size = (np.shape(images)[0],336,336))
-print(images.shape, flush = True)
-#### we ha e 3584 images in total
-print(n_img)
-images_training = images[584:584+n_img]
-images_test = images[400:584]
-
-print('NR of images ', images_training.shape, images_test.shape, flush = True)
-sinograms = torch.tensor(
-    create_noisy_sinograms_poisson(images_training, number_angles, photon_count=args.noise_intensity, correlated_noise=args.correlated_noise, gaussian_noise_std = args.gaussian_noise_std)
-)
-sinograms_test = torch.tensor(
-    create_noisy_sinograms_poisson(images_test, number_angles, photon_count=args.noise_intensity, correlated_noise=args.correlated_noise, gaussian_noise_std = args.gaussian_noise_std)
-)
+    print('NR of images ', images_training.shape, images_test.shape, flush = True)
+    sinograms = torch.tensor(
+        create_noisy_sinograms_poisson(images_training, number_angles, photon_count=args.noise_intensity, correlated_noise=args.correlated_noise, gaussian_noise_std = args.gaussian_noise_std)
+    )
+    sinograms_test = torch.tensor(
+        create_noisy_sinograms_poisson(images_test, number_angles, photon_count=args.noise_intensity, correlated_noise=args.correlated_noise, gaussian_noise_std = args.gaussian_noise_std)
+    )
 '>>-------------------------------------------------------------------------<<'
 ' Adding noise to the projection data'
 '>>-------------------------------------------------------------------------<<'

@@ -39,6 +39,7 @@ from skimage.metrics import structural_similarity, peak_signal_noise_ratio
 import torch.nn.functional as F
 from scipy.interpolate import griddata
 import itertools
+import re
 #%%
 
 '>>-------------------------------------------------------------------------<<'
@@ -186,6 +187,111 @@ def sobolev_norm_fourier(f, g, s = 1, a = 1):
     Ffreq = Ffreq.view(1, 1, -1, 1)
     loss = torch.mean(torch.abs((Ffreq.to(f.device)*Fdiff)**2))
     return loss
+
+
+#### load 2deetect dataset
+
+
+def load_reconstructions_to_tensor(folder_path):
+    """
+    Loads all reconstruction.npy files from a folder, sorts them by 
+    slice number, and returns them as a single stacked PyTorch tensor.
+    """
+    if not os.path.isdir(folder_path):
+        raise FileNotFoundError(f"The path {folder_path} does not exist.")
+
+    # List all files in the directory
+    all_files = os.listdir(folder_path)
+    
+    recon_files = []
+    for f in all_files:
+        if f.startswith("reconstruction_slice_") and f.endswith(".npy"):
+            # Extract the slice number for accurate numerical sorting
+            match = re.search(r'reconstruction_slice_(\d+)\.npy', f)
+            if match:
+                slice_num = int(match.group(1))
+                recon_files.append((slice_num, f))
+
+    if not recon_files:
+        print("No matching reconstruction files found.")
+        return None
+
+    # Sort files numerically by slice number (so slice 2 comes before slice 10)
+    recon_files.sort(key=lambda x: x[0])
+    
+    print(f"Found {len(recon_files)} slices. Loading into PyTorch...")
+
+    # Load arrays into a list
+    loaded_slices = []
+    for _, file_name in recon_files:
+        file_path = os.path.join(folder_path, file_name)
+        
+        # Load numpy array (using mmap_mode='r' is safer for massive datasets)
+        arr = np.load(file_path)
+        arr = resize(arr, (336,336))
+        # Convert directly to a PyTorch tensor
+        tensor_slice = torch.from_numpy(arr)
+        loaded_slices.append(tensor_slice)
+
+    # Stack all slices along a new dimension (dim=0 creates a [Slices, Height, Width] volume)
+    stacked_tensor = torch.stack(loaded_slices, dim=0)
+    
+    print(f"Successfully created tensor with shape: {stacked_tensor.shape}")
+    return stacked_tensor
+
+def load_sinograms_to_tensor(folder_path, nr_angles):
+    """
+    Loads all sinogram.npy files from a folder, sorts them by 
+    slice number, and returns them as a single stacked PyTorch tensor.
+    """
+    if not os.path.isdir(folder_path):
+        raise FileNotFoundError(f"The path {folder_path} does not exist.")
+
+    # List all files in the directory
+    all_files = os.listdir(folder_path)
+    
+    sinogram_files = []
+    for f in all_files:
+        if f.startswith("sinogram_slice_") and f.endswith(".npy"):
+            # Extract the slice number for accurate numerical sorting
+            match = re.search(r'sinogram_slice_(\d+)\.npy', f)
+            if match:
+                slice_num = int(match.group(1))
+                sinogram_files.append((slice_num, f))
+
+    if not sinogram_files:
+        print("No matching sinogram files found.")
+        return None
+
+    # Sort files numerically by slice number
+    sinogram_files.sort(key=lambda x: x[0])
+    
+    print(f"Found {len(sinogram_files)} sinograms. Loading into PyTorch...")
+
+    # Load arrays into a list
+    loaded_slices = []
+    for _, file_name in sinogram_files:
+        file_path = os.path.join(folder_path, file_name)
+        
+        # Load numpy array
+        arr = np.load(file_path)
+        inter = arr.shape[0]//2//nr_angles
+        print(inter)
+        arr = arr[:arr.shape[0]//2]
+        arr = arr[::inter]
+        arr = resize(arr, (nr_angles, 336))
+        arr = arr.T
+   
+        
+        # Convert to PyTorch tensor without duplicating memory
+        tensor_slice = torch.from_numpy(arr)
+        loaded_slices.append(tensor_slice)
+
+    # Stack all slices along dim=0 (creates a [Slices, Views, Detectors] tensor)
+    stacked_tensor = torch.stack(loaded_slices, dim=0)
+    
+    print(f"Successfully created sinogram tensor with shape: {stacked_tensor.shape}")
+    return stacked_tensor
 
 #%%
 
@@ -916,6 +1022,9 @@ class Sparse2Inverse_p2p:
                 angle_vector=theta,
                 folds=self.folds,
             )
+            mask = create_circular_mask(reconstructions.shape[-2],  reconstructions.shape[-2], reconstructions.shape[-2]//2)
+            reconstructions[i,0]*=mask
+            
 
         return (
             torch.tensor(reconstructions),
@@ -1621,7 +1730,8 @@ def validate_average(validation_dataloader, N2I, random=False):
             ims = ims.to(N2I.device)
 
             recos_given = N2I.fbp_tomosipo(sinos)
-
+            mask = create_circular_mask(recos_given.shape[-2],  recos_given.shape[-2], recos_given.shape[-2]//2-10)
+            recos_given *= torch.tensor(mask).to(recos_given.device)
             batch_size = sinos.shape[0]
             H, W = ims.shape[-2], ims.shape[-1]
             num_angles = sinos.shape[-1]
