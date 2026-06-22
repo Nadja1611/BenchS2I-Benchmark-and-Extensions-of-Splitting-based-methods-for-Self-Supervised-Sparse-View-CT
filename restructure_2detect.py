@@ -21,8 +21,7 @@ for item in os.listdir(base_dir):
     if item in ["all_sinograms", "all_reconstructions"] or not os.path.isdir(item_path):
         continue
     
-    # Extract the slice number from the folder name (e.g., "slice_123" -> "123")
-    # If your folders are just numbers, it will extract the whole number.
+    # Extract the slice number from the folder name
     slice_match = re.search(r'\d+', item)
     if slice_match:
         slice_num = slice_match.group()
@@ -30,15 +29,24 @@ for item in os.listdir(base_dir):
         # Fallback to the whole folder name if no number is found
         slice_num = item 
 
-    # --- Process Sinogram (Mode 1) ---
-    sinogram_source = os.path.join(item_path, "mode1", "sinogram.npy")
-    if os.path.exists(sinogram_source):
-        new_sino_name = f"sinogram_slice_{slice_num}.npy"
-        shutil.copy2(sinogram_source, os.path.join(output_sinograms, new_sino_name))
-    else:
-        print(f"Warning: sinogram.npy missing in {item}/mode1")
+    # --- Process Mode 1 (Sinogram, Dark, Flat) ---
+    mode1_dir = os.path.join(item_path, "mode1")
+    
+    # Dictionary tracking the filename we want to find and its corresponding new prefix
+    mode1_files = {
+        "sinogram.npy": f"sinogram_slice_{slice_num}.npy",
+        "dark.npy": f"dark_slice_{slice_num}.npy",
+        "flat.npy": f"flat_slice_{slice_num}.npy"
+    }
+    
+    for original_name, new_name in mode1_files.items():
+        source_path = os.path.join(mode1_dir, original_name)
+        if os.path.exists(source_path):
+            shutil.copy2(source_path, os.path.join(output_sinograms, new_name))
+        else:
+            print(f"Warning: {original_name} missing in {item}/mode1")
 
-    # --- Process Reconstruction (Mode 3) ---
+    # --- Process Mode 3 (Reconstruction) ---
     recon_source = os.path.join(item_path, "mode3", "reconstruction.npy")
     if os.path.exists(recon_source):
         new_recon_name = f"reconstruction_slice_{slice_num}.npy"
@@ -47,5 +55,5 @@ for item in os.listdir(base_dir):
         print(f"Warning: reconstruction.npy missing in {item}/mode3")
 
 print("\nTask complete! Your folders are ready:")
-print(f"-> Sinograms: {output_sinograms}")
+print(f"-> Sinograms, Darks & Flats: {output_sinograms}")
 print(f"-> Reconstructions: {output_reconstructions}")

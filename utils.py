@@ -239,6 +239,11 @@ def load_reconstructions_to_tensor(folder_path):
     print(f"Successfully created tensor with shape: {stacked_tensor.shape}")
     return stacked_tensor
 
+
+
+
+#%%
+
 def load_sinograms_to_tensor(folder_path, nr_angles):
     """
     Loads all sinogram.npy files from a folder, sorts them by 
@@ -270,21 +275,43 @@ def load_sinograms_to_tensor(folder_path, nr_angles):
 
     # Load arrays into a list
     loaded_slices = []
-    for _, file_name in sinogram_files:
+    for slice_idx, file_name in sinogram_files:
         file_path = os.path.join(folder_path, file_name)
         
-        # Load numpy array
-        arr = np.load(file_path)
+        # Load the raw sinogram numpy array
+        arr = np.load(file_path).astype(np.float32)
+        
+        # --- Flat & Dark Correction ---
+        dark_path = os.path.join(folder_path, f"dark_slice_{slice_idx:05d}.npy")
+        flat_path = os.path.join(folder_path, f"flat_slice_{slice_idx:05d}.npy")
+     
+        
+        if os.path.exists(dark_path) and os.path.exists(flat_path):
+            dark = np.load(dark_path).astype(np.float32)
+            flat = np.load(flat_path).astype(np.float32)
+            
+            denominator = flat - dark
+            # Prevent division by zero or negative values
+            denominator = np.where(denominator <= 0, 1e-6, denominator)
+            
+            # Apply the correction to the raw array before any downsampling/resizing
+            arr = (arr - dark) / denominator
+        else:
+            print(f"Warning: Missing dark or flat file for slice {slice_idx}. Skipping correction for this slice.")
+        # ------------------------------
+
+        # Your original downsampling, resizing, and axis operations remain completely untouched
         inter = arr.shape[0]//2//nr_angles
         print(inter)
-        arr = arr[:arr.shape[0]//2]
+        
+        arr = arr[arr.shape[0]//2:]
         arr = arr[::inter]
         arr = resize(arr, (nr_angles, 336))
-        arr = arr.T
+        arr = np.moveaxis(arr,-2,-1)
    
-        
         # Convert to PyTorch tensor without duplicating memory
-        tensor_slice = torch.from_numpy(arr)
+        # Note: Added a tiny clip inside the log to keep it safe from 0 or negative values after correction
+        tensor_slice = torch.flip(-torch.log(torch.clamp(torch.from_numpy(arr), min=1e-6)),[1])
         loaded_slices.append(tensor_slice)
 
     # Stack all slices along dim=0 (creates a [Slices, Views, Detectors] tensor)
@@ -292,8 +319,6 @@ def load_sinograms_to_tensor(folder_path, nr_angles):
     
     print(f"Successfully created sinogram tensor with shape: {stacked_tensor.shape}")
     return stacked_tensor
-
-#%%
 
 def fill_zero_columns(tensor, zeros_in='odd', fill_edges=False):
     """
