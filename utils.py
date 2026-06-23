@@ -36,15 +36,27 @@ from scipy.ndimage import gaussian_filter
 from torchvision import transforms
 import gc
 from skimage.metrics import structural_similarity, peak_signal_noise_ratio
+from skimage.transform import downscale_local_mean
+
 import torch.nn.functional as F
 from scipy.interpolate import griddata
 import itertools
 import re
+
 #%%
 
 '>>-------------------------------------------------------------------------<<'
 ' Define helper functions'
 '>>-------------------------------------------------------------------------<<'
+def shift_img(img, num):
+        # Pre-allocating an empty array is the fasted way to shift data. See:
+        # https://stackoverflow.com/questions/30399534/shift-elements-in-a-numpy-array
+    result = np.empty_like(img)
+    result[:,:-num] = img[:,num:]
+    result[:,-num:] = img[:,-1, None]
+        
+    return result
+
 
 def add_gaussian_noise(img, sigma):
     #img = np.array(img)
@@ -244,7 +256,7 @@ def load_reconstructions_to_tensor(folder_path):
 
 #%%
 
-def load_sinograms_to_tensor(folder_path, nr_angles):
+def load_sinograms_to_tensor(folder_path, nr_angles, downsampling_factor=1):
     """
     Loads all sinogram.npy files from a folder, sorts them by 
     slice number, and returns them as a single stacked PyTorch tensor.
@@ -285,8 +297,23 @@ def load_sinograms_to_tensor(folder_path, nr_angles):
         flat_path = os.path.join(folder_path, f"flat_slice_{slice_idx:05d}.npy")
         
         if os.path.exists(dark_path) and os.path.exists(flat_path):
+
+
+
             dark = np.load(dark_path).astype(np.float32)
             flat = np.load(flat_path).astype(np.float32)
+            
+            ###### shifiting
+            arr = shift_img(arr, 3)
+            dark = shift_img(dark, 3)
+            flat = shift_img(flat, 3)
+
+            ############## downscaling 
+            factors = (1, dwonsampling_factor)
+            arr = downscale_local_mean(arr, 2)
+            dark = downscale_local_mean(dark, 2)
+            flat = downscale_local_mean(flat, 2)
+
             denominator = flat - dark
             # Prevent division by zero or negative values
             denominator = np.where(denominator <= 0, 1e-6, denominator)
@@ -297,12 +324,11 @@ def load_sinograms_to_tensor(folder_path, nr_angles):
         # ------------------------------
 
         # Your original downsampling, resizing, and axis operations remain completely untouched
-        inter = arr.shape[0]//2//nr_angles
-        print(inter)
-        
-        arr = arr[arr.shape[0]//2:]
-        arr = arr[::inter]
-        arr = resize(arr, (nr_angles, 336))
+       # inter = arr.shape[0]//2//nr_angles
+       # print(inter)
+       # arr = arr[arr.shape[0]//2:]
+       # arr = arr[::inter]
+      #  arr = resize(arr, (nr_angles, 336))
         arr = np.moveaxis(arr,-2,-1)
    
         # Convert to PyTorch tensor without duplicating memory
