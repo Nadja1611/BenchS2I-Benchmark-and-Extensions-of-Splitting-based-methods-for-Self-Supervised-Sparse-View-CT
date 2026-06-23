@@ -298,8 +298,6 @@ def load_sinograms_to_tensor(folder_path, nr_angles, downsampling_factor=1):
         
         if os.path.exists(dark_path) and os.path.exists(flat_path):
 
-
-
             dark = np.load(dark_path).astype(np.float32)
             flat = np.load(flat_path).astype(np.float32)
             
