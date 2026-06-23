@@ -209,6 +209,7 @@ loss_variant = args.loss_variant
 batch_size = args.batch_size
 n_img = args.number_training_imgs
 
+mode = 'mode2'
 print('correlated noise ', args.correlated_noise, flush = True)
 print('random and fill', args.random_mask, args.fill_zeros, flush = True)
 
@@ -216,19 +217,19 @@ print('random and fill', args.random_mask, args.fill_zeros, flush = True)
 ' Loading and augmenting image data. Computing sinograms'
 '>>-------------------------------------------------------------------------<<'
 if args.use_2detect:
-    path_reco = r"/home/johannes/data_2detect/all_reconstructions"
+    path_reco = rf"../all_reconstructions_{mode}"
     images = load_reconstructions_to_tensor(path_reco)
-    images_training = images[:200]
-    images_test = images[200:240]
+    images_training = images[:800]
+    images_test = images[800:]
     del(images)
     print('NR of images ', images_training.shape, images_test.shape, flush = True)
-    path_sinos = r"/home/johannes/data_2detect/all_sinograms"
+    path_sinos = rf"../all_sinograms_{mode}"
     sinograms = load_sinograms_to_tensor(path_sinos, nr_angles = args.angles)
     sinograms = sinograms.unsqueeze(1)
     print(sinograms.shape, flush = True)
     
-    sinograms_test = sinograms[200:240]
-    sinograms = sinograms[:200]
+    sinograms_test = sinograms[800:]
+    sinograms = sinograms[:800]
 else:
     path = r"/home/nadja/Documents/Projects/gt_pt"
     images = get_images_from_pt(path, amount_of_images='all', scale_number=1)
@@ -257,15 +258,47 @@ proj_noisy_test = sinograms_test
 '>>-------------------------------------------------------------------------<<'
 ' Generating dataset'
 '>>-------------------------------------------------------------------------<<'
+if args.use_2detect:
+    # --- 1. Ensure both Tensors are 4D [N, 1, H, W] ---
+    # (Assuming images and sinograms are loaded as shown in your previous snippet)
+    images_training = images_training.unsqueeze(1)    # Shape: [800, 1, 336, 336]
+    images_test = images_test.unsqueeze(1)        # Shape: [N_test, 1, 336, 336]
 
-dataset = torch.utils.data.TensorDataset(
-    proj_noisy, images_training
-)
+
+    # --- 2. Per-Image Normalization for Training Set ---
+    # Find the max value for each reconstruction image across dims 2 and 3
+    # keepdim=True ensures the shape is [800, 1, 1, 1], allowing flawless broadcasting
+    reco_train_maxs = images_training.max(dim=2, keepdim=True)[0].max(dim=3, keepdim=True)[0]
+
+    # Add a tiny epsilon (1e-8) to prevent any accidental division by zero
+    reco_train_maxs = torch.clamp(reco_train_maxs, min=1e-8)
+
+    # Divide both the sinograms and reconstructions by the reconstruction's max
+    proj_noisy = sinograms / reco_train_maxs
+    images_training = images_training / reco_train_maxs
 
 
-dataset_test = torch.utils.data.TensorDataset(
-    proj_noisy_test, images_test
-)
+    # --- 3. Per-Image Normalization for Test Set ---
+    reco_test_maxs = images_test.max(dim=2, keepdim=True)[0].max(dim=3, keepdim=True)[0]
+    reco_test_maxs = torch.clamp(reco_test_maxs, min=1e-8)
+
+    proj_noisy_test = sinograms_test / reco_test_maxs
+    images_test = images_test / reco_test_maxs
+
+
+    # --- 4. Create Datasets ---
+    dataset = torch.utils.data.TensorDataset(
+        proj_noisy, images_training.squeeze()
+    )
+
+    dataset_test = torch.utils.data.TensorDataset(
+        proj_noisy_test, images_test.squeeze()
+    )
+
+    print('Normalized training images shape:', images_training.shape, flush=True)
+    print('Normalized training sinograms shape:', proj_noisy.shape, flush=True)
+
+
 Data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 Data_loader_test = DataLoader(dataset_test, batch_size=batch_size, shuffle=False)
 
@@ -314,14 +347,14 @@ else:
 
 
 # Define output path
-newpath = os.path.join("../weights/", experiment_name)
+newpath = os.path.join(f"../weights_norm_{mode}/", experiment_name)
 weights_dir = os.path.join(f"../outputs/weights_paper_{args.noise_intensity}_s2i", experiment_name)
 # Define TensorBoard log path
 if args.correlated_noise:
     writer = SummaryWriter(log_dir=os.path.join(f"../tensorboards/tensorboard_correlated_noise_{args.angles}", experiment_name))
 
 else:
-    writer = SummaryWriter(log_dir=os.path.join(f"../tensorboards/tensorboard_ii_{args.angles}_{args.noise_intensity}_random_{args.random_mask}", experiment_name))
+    writer = SummaryWriter(log_dir=os.path.join(f"../tensorboards/tensorboard_ii_{args.angles}_{args.noise_intensity}_random_{args.random_mask}_normalized_{mode}", experiment_name))
 
 if not os.path.exists(newpath):
     os.makedirs(newpath)

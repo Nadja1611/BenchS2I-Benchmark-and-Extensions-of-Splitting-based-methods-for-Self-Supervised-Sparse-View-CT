@@ -3,9 +3,9 @@ import shutil
 import re
 
 # Define the base directory and the target output directories
-base_dir = r"/home/johannes/LION/LION/data_loaders/2deteCT/processed"
-output_sinograms = os.path.join(base_dir, "all_sinograms")
-output_reconstructions = os.path.join(base_dir, "all_reconstructions")
+base_dir = r"/scratch/nadja/BenchS2I_2detect/BenchS2I-Benchmark-and-Extensions-of-Splitting-based-methods-for-Self-Supervised-Sparse-View-CT/LION/LION/data_loaders/2deteCT_processed"
+output_sinograms = os.path.join(base_dir, "all_sinograms_mode1")
+output_reconstructions = os.path.join(base_dir, "all_reconstructions_mode1")
 
 # Create the new folders if they don't exist yet
 os.makedirs(output_sinograms, exist_ok=True)

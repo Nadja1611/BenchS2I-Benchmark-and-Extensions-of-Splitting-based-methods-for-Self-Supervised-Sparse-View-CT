@@ -263,7 +263,6 @@ def load_sinograms_to_tensor(folder_path, nr_angles):
             if match:
                 slice_num = int(match.group(1))
                 sinogram_files.append((slice_num, f))
-
     if not sinogram_files:
         print("No matching sinogram files found.")
         return None
@@ -284,16 +283,13 @@ def load_sinograms_to_tensor(folder_path, nr_angles):
         # --- Flat & Dark Correction ---
         dark_path = os.path.join(folder_path, f"dark_slice_{slice_idx:05d}.npy")
         flat_path = os.path.join(folder_path, f"flat_slice_{slice_idx:05d}.npy")
-     
         
         if os.path.exists(dark_path) and os.path.exists(flat_path):
             dark = np.load(dark_path).astype(np.float32)
             flat = np.load(flat_path).astype(np.float32)
-            
             denominator = flat - dark
             # Prevent division by zero or negative values
             denominator = np.where(denominator <= 0, 1e-6, denominator)
-            
             # Apply the correction to the raw array before any downsampling/resizing
             arr = (arr - dark) / denominator
         else:

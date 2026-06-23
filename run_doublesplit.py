@@ -178,6 +178,12 @@ parser.add_argument(
     help = "1 to show images and 0 to save them",
     default = False)
 
+parser.add_argument(
+    "-use_2detect",
+    "--use_2detect",
+    type = bool,
+    help = "do we work with 2detect data?",
+    default = True)
 
 parser.add_argument(
     "-method",
@@ -198,7 +204,6 @@ parser.add_argument(
     type = int,
     help="number of images used for training",
     default = 1000)
-
 '>>-------------------------------------------------------------------------<<'
 ' Parse arguments and set random seed'
 '>>-------------------------------------------------------------------------<<'
@@ -213,37 +218,44 @@ loss_variant = args.loss_variant
 batch_size = args.batch_size
 n_img = args.number_training_imgs
 
-print('random ', args.random_mask, flush = True)
+mode = 'mode1'
+print('correlated noise ', args.correlated_noise, flush = True)
+print('random and fill', args.random_mask, args.fill_zeros, flush = True)
+
 '>>-------------------------------------------------------------------------<<'
 ' Loading and augmenting image data. Computing sinograms'
 '>>-------------------------------------------------------------------------<<'
+if args.use_2detect:
+    path_reco = rf"../all_reconstructions_{mode}"
+    images = load_reconstructions_to_tensor(path_reco)
+    images_training = images[:800]
+    images_test = images[800:]
+    del(images)
+    print('NR of images ', images_training.shape, images_test.shape, flush = True)
+    path_sinos = rf"../all_sinograms_{mode}"
+    sinograms = load_sinograms_to_tensor(path_sinos, nr_angles = args.angles)
+    sinograms = sinograms.unsqueeze(1)
+    print(sinograms.shape, flush = True)
+    
+    sinograms_test = sinograms[800:]
+    sinograms = sinograms[:800]
+else:
+    path = r"/home/nadja/Documents/Projects/gt_pt"
+    images = get_images_from_pt(path, amount_of_images='all', scale_number=1)
+    images = rescale_images(images, device, target_size = (np.shape(images)[0],336,336))
+    print(images.shape, flush = True)
+    #### we ha e 3584 images in total
+    print(n_img)
+    images_training = images[584:584+n_img]
+    images_test = images[400:584]
 
-#images = get_images("./walnuts")
-# Define the target size and initialize the new images array
-#Images = rescale_images(images, device, target_size = (37,362,362))
-
-#sinograms = torch.tensor(
-#    create_noisy_sinograms(Images, number_angles, args.noise_intensity)
-#)
-
-path = r"/home/nadja/Documents/Projects/gt_pt"
-
-images = get_images_from_pt(path, amount_of_images='all', scale_number=1)
-images = rescale_images(images, device, target_size = (np.shape(images)[0],336,336))
-print(images.shape, flush = True)
-#### we ha e 3584 images in total
-print(n_img)
-images_training = images[584:584+n_img]
-images_test = images[400:584]
-
-print('NR of images ', images_training.shape, images_test.shape, flush = True)
-sinograms = torch.tensor(
-    create_noisy_sinograms_poisson(images_training, number_angles, photon_count=args.noise_intensity, correlated_noise=args.correlated_noise, gaussian_noise_std = args.gaussian_noise_std)
-)
-sinograms_test = torch.tensor(
-    create_noisy_sinograms_poisson(images_test, number_angles, photon_count=args.noise_intensity, correlated_noise=args.correlated_noise, gaussian_noise_std = args.gaussian_noise_std)
-)
-
+    print('NR of images ', images_training.shape, images_test.shape, flush = True)
+    sinograms = torch.tensor(
+        create_noisy_sinograms_poisson(images_training, number_angles, photon_count=args.noise_intensity, correlated_noise=args.correlated_noise, gaussian_noise_std = args.gaussian_noise_std)
+    )
+    sinograms_test = torch.tensor(
+        create_noisy_sinograms_poisson(images_test, number_angles, photon_count=args.noise_intensity, correlated_noise=args.correlated_noise, gaussian_noise_std = args.gaussian_noise_std)
+    )
 '>>-------------------------------------------------------------------------<<'
 ' Adding noise to the projection data'
 '>>-------------------------------------------------------------------------<<'
@@ -255,19 +267,61 @@ proj_noisy_test = sinograms_test
 '>>-------------------------------------------------------------------------<<'
 ' Generating dataset'
 '>>-------------------------------------------------------------------------<<'
+if args.use_2detect:
+    # --- 1. Ensure both Tensors are 4D [N, 1, H, W] ---
+    # (Assuming images and sinograms are loaded as shown in your previous snippet)
+    images_training = images_training.unsqueeze(1)    # Shape: [800, 1, 336, 336]
+    images_test = images_test.unsqueeze(1)        # Shape: [N_test, 1, 336, 336]
 
-dataset = torch.utils.data.TensorDataset(
-    proj_noisy, images_training
-)
+
+    # --- 2. Per-Image Normalization for Training Set ---
+    # Find the max value for each reconstruction image across dims 2 and 3
+    # keepdim=True ensures the shape is [800, 1, 1, 1], allowing flawless broadcasting
+    reco_train_maxs = images_training.max(dim=2, keepdim=True)[0].max(dim=3, keepdim=True)[0]
+
+    # Add a tiny epsilon (1e-8) to prevent any accidental division by zero
+    reco_train_maxs = torch.clamp(reco_train_maxs, min=1e-8)
+
+    # Divide both the sinograms and reconstructions by the reconstruction's max
+    proj_noisy = sinograms / reco_train_maxs
+    images_training = images_training / reco_train_maxs
 
 
-dataset_test = torch.utils.data.TensorDataset(
-    proj_noisy_test, images_test
-)
-Data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True,
-                         num_workers=0, pin_memory=False, persistent_workers=False)
+    # --- 3. Per-Image Normalization for Test Set ---
+    reco_test_maxs = images_test.max(dim=2, keepdim=True)[0].max(dim=3, keepdim=True)[0]
+    reco_test_maxs = torch.clamp(reco_test_maxs, min=1e-8)
 
+    proj_noisy_test = sinograms_test / reco_test_maxs
+    images_test = images_test / reco_test_maxs
+
+
+    # --- 4. Create Datasets ---
+    dataset = torch.utils.data.TensorDataset(
+        proj_noisy, images_training.squeeze()
+    )
+
+    dataset_test = torch.utils.data.TensorDataset(
+        proj_noisy_test, images_test.squeeze()
+    )
+
+    print('Normalized training images shape:', images_training.shape, flush=True)
+    print('Normalized training sinograms shape:', proj_noisy.shape, flush=True)
+
+
+Data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 Data_loader_test = DataLoader(dataset_test, batch_size=batch_size, shuffle=False)
+
+
+'>>-------------------------------------------------------------------------<<'
+'Define training details and prepare output folders / tensorboard'
+'>>-------------------------------------------------------------------------<<'
+
+if args.method == 'S2I' or 'P2P':
+    N_epochs = 6000
+else:
+    N_epochs = 10000
+
+
 
 
 '>>-------------------------------------------------------------------------<<'
@@ -304,7 +358,7 @@ else:
         experiment_name = (
         f"{args.method}_gridsize_{args.grid_size}_loss_one_grad_step_"
         f"{args.loss_variant}_"
-        f"lr_{args.learning_rate}_angles_{args.angles}_random_mask_{args.random_mask}_interpolate_{args.fill_zeros}_intensity_{args.noise_intensity}"
+        f"lr_{args.learning_rate}_angles_{args.angles}_random_mask_{args.random_mask}_interpolate_{args.fill_zeros}_intensity_{args.noise_intensity}_{mode}"
     )
 
 
