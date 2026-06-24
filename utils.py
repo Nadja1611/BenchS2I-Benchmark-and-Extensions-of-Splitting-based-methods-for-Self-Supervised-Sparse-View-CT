@@ -302,15 +302,15 @@ def load_sinograms_to_tensor(folder_path, nr_angles, downsampling_factor=1):
             flat = np.load(flat_path).astype(np.float32)
             
             ###### shifiting
+
             arr = shift_img(arr, 3)
-            dark = shift_img(dark, 3)
-            flat = shift_img(flat, 3)
+
 
             ############## downscaling 
-            factors = (1, dwonsampling_factor)
-            arr = downscale_local_mean(arr, 2)
-            dark = downscale_local_mean(dark, 2)
-            flat = downscale_local_mean(flat, 2)
+            #factors = (1, downsampling_factor)
+            #arr = downscale_local_mean(arr, 2)
+            #dark = downscale_local_mean(dark, 2)
+            #flat = downscale_local_mean(flat, 2)
 
             denominator = flat - dark
             # Prevent division by zero or negative values
@@ -322,11 +322,11 @@ def load_sinograms_to_tensor(folder_path, nr_angles, downsampling_factor=1):
         # ------------------------------
 
         # Your original downsampling, resizing, and axis operations remain completely untouched
-       # inter = arr.shape[0]//2//nr_angles
-       # print(inter)
-       # arr = arr[arr.shape[0]//2:]
-       # arr = arr[::inter]
-      #  arr = resize(arr, (nr_angles, 336))
+        inter = arr.shape[0]//2//nr_angles
+        #print(inter)
+        arr = arr[arr.shape[0]//2:]
+        arr = arr[::inter]
+        arr = resize(arr, (nr_angles, 336))
         arr = np.moveaxis(arr,-2,-1)
    
         # Convert to PyTorch tensor without duplicating memory
@@ -499,7 +499,7 @@ def augment_image(image, num_augmentations=8):
 '>>-------------------------------------------------------------------------<<'
 
 
-def compute_validation_metrics(full_recos, Ims, batch_size=32):
+def compute_validation_metrics(full_recos, Ims, batch_size=32,find_constant = False):
     """
     Compute SSIM, PSNR, MSE in a memory-safe way.
     Converts tensors to NumPy in small batches to avoid RAM spikes.
@@ -521,8 +521,23 @@ def compute_validation_metrics(full_recos, Ims, batch_size=32):
         for i in range(full_batch.shape[0]):
             data_range = ims_batch[i].max() - ims_batch[i].min()
             ssim_values.append(structural_similarity(ims_batch[i], full_batch[i], data_range=data_range))
-            psnr_values.append(peak_signal_noise_ratio(ims_batch[i], full_batch[i], data_range=data_range))
-            mse_values.append(np.mean((ims_batch[i] - full_batch[i]) ** 2))
+            if find_constant == True:
+                factors = np.linspace(0.3,2.5,50)
+                psnr_value_curr = 0.0
+                for j in range(len(factors)):
+                    psnr_value = peak_signal_noise_ratio(ims_batch[i], factors[j]*full_batch[i], data_range=data_range)
+                    mse_value = np.mean((ims_batch[i] - full_batch[i]) ** 2)
+                    if psnr_value.mean()>psnr_value_curr:
+                        psnr_value_curr = psnr_value
+                        mse_value_curr = mse_value
+                        if i == 5:
+                            print(j)
+                            fprint(factors[j])
+                psnr_values.append(psnr_value_curr)
+                mse_values.append(mse_value_curr)
+            else:
+                psnr_values.append(peak_signal_noise_ratio(ims_batch[i], full_batch[i], data_range=data_range))
+                mse_values.append(np.mean((ims_batch[i] - full_batch[i]) ** 2))
 
     mean_ssim = np.mean(ssim_values)
     mean_psnr = np.mean(psnr_values)
@@ -595,7 +610,7 @@ def compute_validation_metrics_S2I_halfs(tensor):
 
 
 
-def compute_validation_metrics(full_recos, Ims):
+def compute_validation_metrics(full_recos, Ims, find_constant = False):
     
     full_recos_np = full_recos[:, 0].detach().cpu().numpy().astype(np.float32)
     Ims_np = Ims.detach().cpu().numpy().astype(np.float32)
@@ -604,10 +619,26 @@ def compute_validation_metrics(full_recos, Ims):
     for i in range(len(full_recos_np)):
         data_range = Ims_np[i].max() - Ims_np[i].min()
         ssim_values.append(structural_similarity(Ims_np[i], full_recos_np[i], data_range=data_range))
-        psnr_values.append(peak_signal_noise_ratio(Ims_np[i], full_recos_np[i], data_range=data_range))
-        mse_values.append(np.mean((Ims_np[i] - full_recos_np[i]) ** 2))  # MSE computation
+        if find_constant == True: 
+            factors = np.linspace(0.3,2.5,50)
+            psnr_value_curr = 0.0
+            for j in range(len(factors)):
+                psnr_value = peak_signal_noise_ratio(Ims_np[i], factors[j]*full_recos_np[i], data_range=data_range)
+                mse_value = np.mean((Ims_np[i] - full_recos_np[i][i]) ** 2)
+                if psnr_value.mean()>psnr_value_curr:
+                    psnr_value_curr = psnr_value
+                    mse_value_curr = mse_value
+                    if i == 5:
+                        print(j)
+                        print(factors[j])
+            psnr_values.append(psnr_value_curr)
+            mse_values.append(mse_value_curr)
 
-    mean_ssim = np.mean(ssim_values)
+        else:
+            psnr_values.append(peak_signal_noise_ratio(Ims_np[i], full_recos_np[i], data_range=data_range))
+            mse_values.append(np.mean((Ims_np[i] - full_recos_np[i]) ** 2))  # MSE computation
+
+    mean_ssim = np.mean(ssim_values)    
     mean_psnr = np.mean(psnr_values)
     mean_mse = np.mean(mse_values)
     

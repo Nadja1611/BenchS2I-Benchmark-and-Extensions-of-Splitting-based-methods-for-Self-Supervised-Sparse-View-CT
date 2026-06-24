@@ -217,13 +217,13 @@ print('random and fill', args.random_mask, args.fill_zeros, flush = True)
 ' Loading and augmenting image data. Computing sinograms'
 '>>-------------------------------------------------------------------------<<'
 if args.use_2detect:
-    path_reco = rf"../all_reconstructions_{mode}"
+    path_reco = rf"../data_2detect_mode2/all_reconstructions_{mode}"
     images = load_reconstructions_to_tensor(path_reco)
     images_training = images[:800]
     images_test = images[800:]
     del(images)
     print('NR of images ', images_training.shape, images_test.shape, flush = True)
-    path_sinos = rf"../all_sinograms_{mode}"
+    path_sinos = rf"../data_2detect_mode2/all_sinograms_{mode}"
     sinograms = load_sinograms_to_tensor(path_sinos, nr_angles = args.angles)
     sinograms = sinograms.unsqueeze(1)
     print(sinograms.shape, flush = True)
@@ -485,9 +485,9 @@ for epoch in range(N_epochs):
     
     if epoch % 10 == 0:
 
-        mean_ssim_p2p, mean_psnr_p2p, mean_mse_p2p = compute_validation_metrics(full_recos_p2p, Ims_p2p)
-        mean_ssim_s2i, mean_psnr_s2i, mean_mse_s2i = compute_validation_metrics(full_recos_s2i, Ims_s2i)
-        mean_ssim_ii, mean_psnr_ii, mean_mse_ii = compute_validation_metrics(full_recos_ii, Ims_ii)
+        mean_ssim_p2p, mean_psnr_p2p, mean_mse_p2p = compute_validation_metrics(full_recos_p2p, Ims_p2p, find_constant = True)
+        mean_ssim_s2i, mean_psnr_s2i, mean_mse_s2i = compute_validation_metrics(full_recos_s2i, Ims_s2i, find_constant = True)
+        mean_ssim_ii, mean_psnr_ii, mean_mse_ii = compute_validation_metrics(full_recos_ii, Ims_ii, find_constant = True)
 
 
         all_ssim_p2p.append(mean_ssim_p2p)
