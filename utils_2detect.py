@@ -27,8 +27,11 @@ from torch.optim import lr_scheduler
 from torch.utils.data import TensorDataset, DataLoader
 from itertools import combinations
 import LION.CTtools.ct_utils as ct
-from ts_algorithms import fbp, tv_min2d
 import LION.CTtools.ct_geometry as ctgeo
+from LION.CTtools.ct_utils import make_operator
+from ts_algorithms import fdk, nag_ls
+
+
 from skimage.transform import rescale, resize
 import skimage
 import argparse
@@ -45,6 +48,37 @@ import re
 
 #%%
 
+
+### Max Kiss geometry for 2detect
+def get_default_geometry():
+        geometry = ctgeo.Geometry.default_parameters()
+        # From Max Kiss code
+        SOD = 431.019989
+        SDD = 529.000488
+        detPix = 0.0748
+        detSubSamp = 2
+        detPixSz = detSubSamp * detPix
+        nPix = 956
+        det_width = detPixSz * nPix
+        FOV_width = det_width * SOD / SDD
+        nVox = 1024
+        voxSz = FOV_width / nVox
+        scaleFactor = 1.0 / voxSz
+        SDD = SDD * scaleFactor
+        SOD = SOD * scaleFactor
+        detPixSz = detPixSz * scaleFactor
+        geometry.dsd = SDD
+        geometry.dso = SOD
+        geometry.detector_shape = [1, 956]
+        geometry.detector_size = [detPixSz, detPixSz * 956]
+        geometry.image_shape = [1, 956, 956]
+        geometry.image_size = [1, 956, 956]
+        geometry.image_pos = [0, -1, -1]
+        geometry.angles = -np.linspace(0, 2 * np.pi, 3600, endpoint=False) + np.pi
+        return geometry
+
+def get_operator(self):
+    return make_operator(self.geometry)
 '>>-------------------------------------------------------------------------<<'
 ' Define helper functions'
 '>>-------------------------------------------------------------------------<<'
@@ -961,9 +995,6 @@ class Proj2Proj:
 
 
 
-
-
-
 #-------------------------Sparse2inverse splitting -------------------------------#
     
 class Sparse2Inverse_p2p:
@@ -1078,11 +1109,11 @@ class Sparse2Inverse_p2p:
         masks = sinogram_mask.cpu()
 
         # ==========================
-        # FBP reconstruction
+        # FDK reconstruction
         # ==========================
         for i in range(sinogram_1.shape[0]):
             I = sinogram_1[i, 0].cpu()
-            reconstructions[i, 0] = self.fbp_tomosipo(
+            reconstructions[i, 0] = self.fdk_tomosipo(
                 torch.tensor(I.unsqueeze(0).unsqueeze(0)),
                 angle_vector=theta,
                 folds=self.folds,
@@ -1113,7 +1144,7 @@ class Sparse2Inverse_p2p:
             for j in range(1):
                 I = sinograms[i,j].cpu()
                 ### input of fbp should have shape [1,1, s, theta]
-                reconstructions[i, j] = self.fbp_tomosipo(
+                reconstructions[i, j] = self.fdk_tomosipo(
                     torch.tensor(I.unsqueeze(0).unsqueeze(0)),
                     angle_vector=theta,
                     folds=1,
@@ -1127,17 +1158,20 @@ class Sparse2Inverse_p2p:
     def projection_tomosipo(self, img, sino, invariant_inference=False):
         """Compute tomographic projection."""
         angles = sino if isinstance(sino, int) else sino.shape[-1]
-        geo = ctgeo.Geometry.parallel_default_parameters(
-            image_shape=(sino.shape[0], 956, 956)
-        )
+      #  geo = ctgeo.Geometry.parallel_default_parameters(
+        #    image_shape=(sino.shape[0], 956, 956)
+       # )
+        geo = get_default_geometry()
+
+        
         if invariant_inference == False:
             geo.angles=np.linspace(0, np.pi, angles, endpoint=False)
-            op = to_autograd(ct.make_operator(geo))
+            op = to_autograd(make_operator(geo))
             sino = op(img[:, 0].to(self.device)).unsqueeze(1)
         else:
             geo.angles=np.linspace(0, np.pi, 544, endpoint=False)
             angles_old = np.linspace(0, np.pi, angles, endpoint=False)
-            op = to_autograd(ct.make_operator(geo))
+            op = to_autograd(make_operator(geo))
             sino = op(img[:, 0].to(self.device)).unsqueeze(1)
 
         if invariant_inference == False:
@@ -1145,19 +1179,18 @@ class Sparse2Inverse_p2p:
         else:
             return torch.moveaxis(sino, -1, -2), angles_old, geo.angles
 
-    def fbp_tomosipo(self, sino, angle_vector=None, folds=None):
+    def fdk_tomosipo(self, sino, angle_vector=None, folds=None):
         """Perform filtered back-projection reconstruction."""
         angles = sino.shape[-1]
-        geo = ctgeo.Geometry.parallel_default_parameters(
-            image_shape=(sino.shape[0], 956, 956),
-        )     
+        geo = get_default_geometry()
+
         if angle_vector is not None and angle_vector[0] is not None:
             geo.angles = angle_vector
         else:
             geo.angles=np.linspace(0, np.pi, angles, endpoint=False) 
         op = ct.make_operator(geo)
         sino = torch.moveaxis(sino, -1, -2)
-        return fbp(op, sino[:, 0]).unsqueeze(1)
+        return fdk(op, sino[:, 0]).unsqueeze(1)
 
 
     def interpolate_mask_new(self, tensor, mask, mask_inv, iteration):
@@ -1476,7 +1509,7 @@ def validate_average(validation_dataloader, N2I, random=False):
             sinos = sinos.to(N2I.device)
             ims = ims.to(N2I.device)
 
-            recos_given = N2I.fbp_tomosipo(sinos)
+            recos_given = N2I.fdk_tomosipo(sinos)
             mask = create_circular_mask(recos_given.shape[-2],  recos_given.shape[-2], recos_given.shape[-2]//2-10)
             recos_given *= torch.tensor(mask).to(recos_given.device)
             batch_size = sinos.shape[0]
@@ -1566,7 +1599,7 @@ def validate_P_invariant(validation_dataloader, N2I, random=False, full_size = 5
             sinos = sinos.to(N2I.device)
             ims = ims.to(N2I.device)
 
-            recos_given = N2I.fbp_tomosipo(sinos)
+            recos_given = N2I.fdk_tomosipo(sinos)
 
 
 
@@ -1624,7 +1657,7 @@ def validate_P_invariant(validation_dataloader, N2I, random=False, full_size = 5
                     final_sino += output_sino_J
                     mask_sum += mask
 
-                final_reco = N2I.fbp_tomosipo(final_sino/mask_sum)
+                final_reco = N2I.fdk_tomosipo(final_sino/mask_sum)
                 
                 mask = create_circular_mask( final_reco.shape[-2],  final_reco.shape[-2], final_reco.shape[-2]//2)
                 mask_tensor = torch.from_numpy(mask)
@@ -1675,7 +1708,7 @@ def validate_P_invariant_doublesplit(validation_dataloader, N2I, random=False, f
             
             sinos = sinos.to(N2I.device)
             ims = ims.to(N2I.device)
-            recos_given = N2I.fbp_tomosipo(sinos)
+            recos_given = N2I.fdk_tomosipo(sinos)
 
             batch_size = sinos.shape[0]
             H, W = ims.shape[-2], ims.shape[-1]
@@ -1745,7 +1778,7 @@ def validate_P_invariant_doublesplit(validation_dataloader, N2I, random=False, f
                     mask_sum += mask
 
 
-                final_reco = N2I.fbp_tomosipo(final_sino/mask_sum)
+                final_reco = N2I.fdk_tomosipo(final_sino/mask_sum)
                 
                 
                 mask = create_circular_mask( final_reco.shape[-2],  final_reco.shape[-2], final_reco.shape[-2]//2)
@@ -1812,7 +1845,7 @@ def validate_average_ds(validation_dataloader, N2I, interpolate=True):
             ims = ims.to(N2I.device)
 
             # Baseline reconstruction (full sinogram)
-            recos_given = N2I.fbp_tomosipo(sinos)
+            recos_given = N2I.fdk_tomosipo(sinos)
 
             batch_size = sinos.shape[0]
             H, W = ims.shape[-2], ims.shape[-1]
@@ -1896,7 +1929,7 @@ def validate_direct(validation_dataloader, N2I):
     with torch.no_grad():
         for sinos, ims in validation_dataloader:
             ims = ims.to(N2I.device)
-            recos_given = N2I.fbp_tomosipo(sinos)
+            recos_given = N2I.fdk_tomosipo(sinos)
 
             final_recos_all_grids = []
 
