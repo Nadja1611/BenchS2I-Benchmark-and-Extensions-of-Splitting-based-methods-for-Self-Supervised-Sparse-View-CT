@@ -315,12 +315,21 @@ def load_sinograms_to_tensor(folder_path, nr_angles, downsampling_factor=1):
         # ------------------------------
 
         # Select only the second half of raw rows, which corresponds to the valid 0..pi view range.
-        arr = arr[arr.shape[0] // 2 :]
+        #arr = arr[arr.shape[0] // 2 :]
 
-        step = arr.shape[0] // nr_angles
-        arr = arr[::step][:nr_angles]
-        arr = resize(arr, (nr_angles, arr.shape[-1]))
-        arr = np.moveaxis(arr, -2, -1)
+        #step = arr.shape[0] // nr_angles
+        #arr = arr[::step][:nr_angles]
+        #arr = resize(arr, (nr_angles, arr.shape[-1]))
+        #arr = np.moveaxis(arr, -2, -1)
+
+
+        inter = arr.shape[0]//2//nr_angles
+        #print(inter)
+        arr = arr[arr.shape[0]//2:]
+        arr = arr[::inter]
+        arr = resize(arr, (nr_angles, 956))
+        arr = np.moveaxis(arr,-2,-1)
+   
         # Convert to PyTorch tensor without duplicating memory
         # Note: Added a tiny clip inside the log to keep it safe from 0 or negative values after correction
         tensor_slice = torch.flip(-torch.log(torch.clamp(torch.from_numpy(arr), min=1e-6)),[1])
@@ -458,22 +467,31 @@ def compute_lpips(lpips_fn, recos, gts, device, chunk_size=1):
     recos: [B,1,H,W] or [B,H,W]
     gts  : [B,1,H,W] or [B,H,W]
     """
-    recos = _to_lpips_range_and_rgb(recos)
-    gts = _to_lpips_range_and_rgb(gts)
-
     if recos.shape[0] == 0:
         return 0.0
+
+    if recos.ndim == 3:
+        recos = recos.unsqueeze(1)
+    if gts.ndim == 3:
+        gts = gts.unsqueeze(1)
 
     original_device = next(lpips_fn.parameters()).device
     model = lpips_fn
     total_lpips = 0.0
     total_count = 0
 
+    def preprocess_chunk(x, eval_device):
+        x = x.to(eval_device).float()
+        x = torch.clamp(x, 0.0, 1.0)
+        x = x.repeat(1, 3, 1, 1)
+        x = x * 2.0 - 1.0
+        return x
+
     def eval_on_device(eval_device, eval_model):
         nonlocal total_lpips, total_count
         for i in range(0, recos.shape[0], chunk_size):
-            r = recos[i : i + chunk_size].to(eval_device)
-            g = gts[i : i + chunk_size].to(eval_device)
+            r = preprocess_chunk(recos[i : i + chunk_size], eval_device)
+            g = preprocess_chunk(gts[i : i + chunk_size], eval_device)
             total_lpips += eval_model(r, g).sum().item()
             total_count += r.shape[0]
 
