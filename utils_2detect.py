@@ -769,7 +769,7 @@ class Proj2Proj:
 
         # batch FBP WITHOUT CPU HOPS
         for i in range(B):
-            reconstructions[i] = self.fbp_tomosipo(
+            reconstructions[i] = self.fdk_tomosipo(
                 masked[i:i+1], angle_vector=theta, folds=self.folds
             )
 
@@ -917,7 +917,7 @@ class Proj2Proj:
             for j in range(1):
                 I = sinograms[i,j].cpu()
                 ### input of fbp should have shape [1,1, s, theta]
-                reconstructions[i, j] = self.fbp_tomosipo(
+                reconstructions[i, j] = self.fdk_tomosipo(
                     torch.tensor(I.unsqueeze(0).unsqueeze(0)),
                     angle_vector=theta,
                     folds=1,
@@ -927,21 +927,25 @@ class Proj2Proj:
             torch.tensor(reconstructions),
             sinograms,
         )
+    
 
     def projection_tomosipo(self, img, sino, invariant_inference=False):
         """Compute tomographic projection."""
         angles = sino if isinstance(sino, int) else sino.shape[-1]
-        geo = ctgeo.Geometry.parallel_default_parameters(
-            image_shape=(sino.shape[0], 956, 956)
-        )
+      #  geo = ctgeo.Geometry.parallel_default_parameters(
+        #    image_shape=(sino.shape[0], 956, 956)
+       # )
+        geo = get_default_geometry()
+
+        
         if invariant_inference == False:
             geo.angles=np.linspace(0, np.pi, angles, endpoint=False)
-            op = to_autograd(ct.make_operator(geo))
+            op = to_autograd(make_operator(geo))
             sino = op(img[:, 0].to(self.device)).unsqueeze(1)
         else:
             geo.angles=np.linspace(0, np.pi, 544, endpoint=False)
             angles_old = np.linspace(0, np.pi, angles, endpoint=False)
-            op = to_autograd(ct.make_operator(geo))
+            op = to_autograd(make_operator(geo))
             sino = op(img[:, 0].to(self.device)).unsqueeze(1)
 
         if invariant_inference == False:
@@ -949,22 +953,18 @@ class Proj2Proj:
         else:
             return torch.moveaxis(sino, -1, -2), angles_old, geo.angles
 
-    def fbp_tomosipo(self, sino, angle_vector=None, folds=None):
+    def fdk_tomosipo(self, sino, angle_vector=None, folds=None):
         """Perform filtered back-projection reconstruction."""
         angles = sino.shape[-1]
-        geo = ctgeo.Geometry.parallel_default_parameters(
-            image_shape=(sino.shape[0], 956, 956),
-        )
-        
+        geo = get_default_geometry()
+
         if angle_vector is not None and angle_vector[0] is not None:
             geo.angles = angle_vector
         else:
-            geo.angles=np.linspace(0, np.pi, angles, endpoint=False)
-        
+            geo.angles=np.linspace(0, np.pi, angles, endpoint=False) 
         op = ct.make_operator(geo)
         sino = torch.moveaxis(sino, -1, -2)
-        return fbp(op, sino[:, 0]).unsqueeze(1)
-
+        return fdk(op, sino[:, 0]).unsqueeze(1)
 
 
     def pixel_grid_mask(self, shape, patch_size, phase_x, phase_y):
