@@ -47,7 +47,18 @@ import itertools
 import re
 
 #%%
+def fdk_tomosipo(sino, angle_vector=None, folds=None):
+        """Perform filtered back-projection reconstruction."""
+        angles = sino.shape[-1]
+        geo = get_default_geometry()
 
+        if angle_vector is not None and angle_vector[0] is not None:
+            geo.angles = angle_vector
+        else:
+            geo.angles=-np.linspace(0, 2*np.pi, angles, endpoint=False)+np.pi
+        op = ct.make_operator(geo)
+        sino = torch.moveaxis(sino, -1, -2)
+        return fdk(op, sino[:, 0]).unsqueeze(1)
 
 ### Max Kiss geometry for 2detect
 def get_default_geometry():
@@ -373,6 +384,102 @@ def load_sinograms_to_tensor(folder_path, nr_angles, downsampling_factor=1):
     
     print(f"Successfully created sinogram tensor with shape: {stacked_tensor.shape}")
     return stacked_tensor
+
+
+
+
+#%%
+
+def load_sinograms_to_ref_recos(folder_path,  downsampling_factor=1):
+    """
+    Loads all sinogram.npy files from a folder, sorts them by 
+    slice number, and returns them as a single stacked PyTorch tensor.
+    """
+    if not os.path.isdir(folder_path):
+        raise FileNotFoundError(f"The path {folder_path} does not exist.")
+
+    # List all files in the directory
+    all_files = os.listdir(folder_path)
+    
+    sinogram_files = []
+    for f in all_files:
+        if f.startswith("sinogram_slice_") and f.endswith(".npy"):
+            # Extract the slice number for accurate numerical sorting
+            match = re.search(r'sinogram_slice_(\d+)\.npy', f)
+            if match:
+                slice_num = int(match.group(1))
+                sinogram_files.append((slice_num, f))
+    if not sinogram_files:
+        print("No matching sinogram files found.")
+        return None
+
+    # Sort files numerically by slice number
+    sinogram_files.sort(key=lambda x: x[0])
+    
+    print(f"Found {len(sinogram_files)} sinograms. Loading into PyTorch...")
+
+    # Load arrays into a list
+    loaded_slices = []
+    for slice_idx, file_name in sinogram_files:
+        file_path = os.path.join(folder_path, file_name)
+        
+        # Load the raw sinogram numpy array
+        arr = np.load(file_path).astype(np.float32)
+        print(arr.shape)
+        # --- Flat & Dark Correction ---
+        dark_path = os.path.join(folder_path, f"dark_slice_{slice_idx:05d}.npy")
+        flat_path = os.path.join(folder_path, f"flat_slice_{slice_idx:05d}.npy")
+        
+        if os.path.exists(dark_path) and os.path.exists(flat_path):
+
+            dark = np.load(dark_path).astype(np.float32)
+            flat = np.load(flat_path).astype(np.float32)
+            arr = arr[0:-1,:]
+            arr = shift_img(arr, 3)
+
+            arr = downscale_local_mean(arr, downsampling_factor)
+            dark = downscale_local_mean(dark, downsampling_factor)
+            flat = downscale_local_mean(flat, downsampling_factor)
+
+            denominator = flat - dark
+            denominator = np.where(denominator <= 0, 1e-6, denominator)
+            arr = (arr - dark) / denominator
+        else:
+            print(f"Warning: Missing dark or flat file for slice {slice_idx}. Skipping correction for this slice.")
+        # ------------------------------
+
+        # Select only the second half of raw rows, which corresponds to the valid 0..pi view range.
+
+        arr = np.moveaxis(arr,-2,-1)
+        print(arr.shape)
+        reconstructions = np.zeros(
+            (arr.shape[-2], arr.shape[-2])
+        )
+        number_of_angles = arr.shape[-1]
+            
+        theta = -np.linspace(0.0, 2*np.pi, number_of_angles, endpoint=False)+np.pi
+        arr = torch.flip(-torch.log(torch.clamp(torch.from_numpy(arr), min=1e-6)),[1])
+
+        
+        I = arr.cpu()
+        ### input of fbp should have shape [1,1, s, theta]
+        reconstructions = fdk_tomosipo(
+            torch.tensor(I.unsqueeze(0).unsqueeze(0)),
+            angle_vector=theta,
+            folds=1,
+        )
+        print(reconstructions.shape)
+   
+        # Convert to PyTorch tensor without duplicating memory
+        # Note: Added a tiny clip inside the log to keep it safe from 0 or negative values after correction
+        loaded_slices.append(reconstructions)
+
+    # Stack all slices along dim=0 (creates a [Slices, Views, Detectors] tensor)
+    stacked_tensor = torch.stack(loaded_slices, dim=0)
+    
+    print(f"Successfully created sinogram tensor with shape: {stacked_tensor.shape}")
+    return stacked_tensor
+
 
 def fill_zero_columns(tensor, zeros_in='odd', fill_edges=False):
     """
