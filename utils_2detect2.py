@@ -74,7 +74,7 @@ def get_default_geometry():
         geometry.image_shape = [1, 956, 956]
         geometry.image_size = [1, 956, 956]
         geometry.image_pos = [0, -1, -1]
-        geometry.angles = -np.linspace(0, 2 * np.pi, 3600, endpoint=False) + np.pi
+        geometry.angles = np.linspace(0, 2 * np.pi, 3600, endpoint=False) 
         geometry.mode = 'fan'
         return geometry
 
@@ -134,7 +134,7 @@ def create_noisy_sinograms_poisson(
 
     # --- 1. Geometry ---
     geo = ctgeo.Geometry.parallel_default_parameters(image_shape=images.shape)
-    geo.angles = np.linspace(0, np.pi, angles_full, endpoint=False)
+    geo.angles = np.linspace(0, 2*np.pi, angles_full, endpoint=False)
     geo.image_pos = np.array([0.0, 0.0, 0.0])
 
     # --- 2. Forward operator ---
@@ -202,7 +202,7 @@ def create_noisy_sinograms(images, angles_full, sigma):
         image_shape=images.shape
     )  # parallel beam standard CT
     # 0.2: create operator:
-    geo.angles = np.linspace(0, np.pi, angles_full, endpoint=False) 
+    geo.angles = np.linspace(0, 2*np.pi, angles_full, endpoint=False)
     geo.image_pos = np.array([0.0, 0.0, 0.0])
     op = ct.make_operator(geo)
     # 0.3: forward project:
@@ -334,7 +334,7 @@ def load_sinograms_to_tensor(folder_path, nr_angles, downsampling_factor=1):
 
             dark = np.load(dark_path).astype(np.float32)
             flat = np.load(flat_path).astype(np.float32)
-
+            arr = arr[0:-1,:]
             arr = shift_img(arr, 3)
 
             arr = downscale_local_mean(arr, downsampling_factor)
@@ -357,9 +357,9 @@ def load_sinograms_to_tensor(folder_path, nr_angles, downsampling_factor=1):
         #arr = np.moveaxis(arr, -2, -1)
 
 
-        inter = arr.shape[0]//2//nr_angles
+        inter = arr.shape[0]//nr_angles
         #print(inter)
-        arr = arr[arr.shape[0]//2:]
+        #arr = arr[arr.shape[0]//2:]
         arr = arr[::inter]
         arr = resize(arr, (nr_angles, 956))
         arr = np.moveaxis(arr,-2,-1)
@@ -758,7 +758,7 @@ class Proj2Proj:
         masked_cpu = masked[:, 0].detach().cpu()  # (B, H, W)
 
 
-        theta = np.linspace(0.0, np.pi, W, endpoint=False)
+        theta = np.linspace(0.0, 2*np.pi, W, endpoint=False)
 
         device = sinograms.device
 
@@ -910,7 +910,7 @@ class Proj2Proj:
         )
         number_of_angles = sinograms.shape[-1]
             
-        theta = np.linspace(0.0, np.pi, number_of_angles, endpoint=False)
+        theta = np.linspace(0.0, 2*np.pi, number_of_angles, endpoint=False)
 
         
         for i in range(sinograms.shape[0]):
@@ -939,12 +939,12 @@ class Proj2Proj:
 
         
         if invariant_inference == False:
-            geo.angles=np.linspace(0, np.pi, angles, endpoint=False)
+            geo.angles=np.linspace(0, 2**np.pi, angles, endpoint=False)
             op = to_autograd(ct.make_operator(geo),num_extra_dims = 1, is_2d = True)
             sino = op(img[:, 0].to(self.device)).unsqueeze(1)
         else:
-            geo.angles=np.linspace(0, np.pi, 544, endpoint=False)
-            angles_old = np.linspace(0, np.pi, angles, endpoint=False)
+            geo.angles=np.linspace(0, 2*np.pi, 544, endpoint=False)
+            angles_old = np.linspace(0, 2*np.pi, angles, endpoint=False)
             op = to_autograd(ct.make_operator(geo),num_extra_dims = 1, is_2d = True)
             sino = op(img[:, 0].to(self.device)).unsqueeze(1)
 
@@ -961,7 +961,7 @@ class Proj2Proj:
         if angle_vector is not None and angle_vector[0] is not None:
             geo.angles = angle_vector
         else:
-            geo.angles=np.linspace(0, np.pi, angles, endpoint=False) 
+            geo.angles=np.linspace(0, 2*np.pi, angles, endpoint=False)
         op = ct.make_operator(geo)
         sino = torch.moveaxis(sino, -1, -2)
         return fdk(op, sino[:, 0]).unsqueeze(1)
@@ -1101,7 +1101,7 @@ class Sparse2Inverse_p2p:
 
         sinogram_1 = sinogram_mask_c * sinograms
 
-        theta = np.linspace(0.0, np.pi, number_of_angles, endpoint=False)
+        theta = np.linspace(0.0, 2*np.pi, number_of_angles, endpoint=False)
 
         if self.interpolate:
             sinogram_1 = self.interpolate_mask_new(
@@ -1141,7 +1141,7 @@ class Sparse2Inverse_p2p:
         )
         number_of_angles = sinograms.shape[-1]
             
-        theta = np.linspace(0.0, np.pi, number_of_angles, endpoint=False)
+        theta = np.linspace(0.0, 2*np.pi, number_of_angles, endpoint=False)
 
         
         for i in range(sinograms.shape[0]):
@@ -1169,15 +1169,15 @@ class Sparse2Inverse_p2p:
 
         
         if invariant_inference == False:
-            geo.angles=np.linspace(0, np.pi, angles, endpoint=False)
+            geo.angles=np.linspace(0, 2*np.pi, angles, endpoint=False)
             #geo.image_shape = (sino.shape[0], 956, 956)
             op = to_autograd(make_operator(geo),num_extra_dims = 1, is_2d = True)
             sino = op(img[:, 0].to(self.device)).unsqueeze(1)
         else:
-            geo.angles=np.linspace(0, np.pi, 544, endpoint=False)
+            geo.angles=np.linspace(0, 2*np.pi, 544, endpoint=False)
             #geo.image_shape = (sino.shape[0], 956, 956)
 
-            angles_old = np.linspace(0, np.pi, angles, endpoint=False)
+            angles_old = np.linspace(0, 2*np.pi, angles, endpoint=False)
             op = to_autograd(make_operator(geo),num_extra_dims = 1, is_2d = True)
             sino = op(img[:, 0].to(self.device)).unsqueeze(1)
 
@@ -1196,7 +1196,7 @@ class Sparse2Inverse_p2p:
             geo.image_shape = (sino.shape[0], 956, 956)
 
         else:
-            geo.angles=np.linspace(0, np.pi, angles, endpoint=False) 
+            geo.angles=np.linspace(0, 2*np.pi, angles, endpoint=False) 
             geo.image_shape = (sino.shape[0], 956, 956)
 
         op = ct.make_operator(geo)
@@ -1364,7 +1364,7 @@ class Sparse2Inverse_ds_all_combinations:
         # =========================================================
         # FBP
         # =========================================================
-        theta = np.linspace(0.0, np.pi, T, endpoint=False)
+        theta = np.linspace(0.0, 2*np.pi, T, endpoint=False)
 
         for i in range(B):
             reco_theta[i, 0] = self.fbp_tomosipo(
@@ -1406,7 +1406,7 @@ class Sparse2Inverse_ds_all_combinations:
         )
         number_of_angles = sinograms.shape[-1]
             
-        theta = np.linspace(0.0, np.pi, number_of_angles, endpoint=False)
+        theta = np.linspace(0.0, 2*np.pi, number_of_angles, endpoint=False)
 
         
         for i in range(sinograms.shape[0]):
@@ -1431,12 +1431,12 @@ class Sparse2Inverse_ds_all_combinations:
             image_shape=(sino.shape[0], 956, 956)
         )
         if invariant_inference == False:
-            geo.angles=np.linspace(0, np.pi, angles, endpoint=False)
+            geo.angles=np.linspace(0, 2*np.pi, angles, endpoint=False)
             op = to_autograd(ct.make_operator(geo),num_extra_dims = 1, is_2d = True)
             sino = op(img[:, 0].to(self.device)).unsqueeze(1)
         else:
-            geo.angles=np.linspace(0, np.pi, 544, endpoint=False)
-            angles_old = np.linspace(0, np.pi, angles, endpoint=False)
+            geo.angles=np.linspace(0, 2*np.pi, 544, endpoint=False)
+            angles_old = np.linspace(0, 2*np.pi, angles, endpoint=False)
             op = to_autograd(ct.make_operator(geo),num_extra_dims = 1, is_2d = True)
             sino = op(img[:, 0].to(self.device)).unsqueeze(1)
 
@@ -1455,7 +1455,7 @@ class Sparse2Inverse_ds_all_combinations:
         if angle_vector is not None and angle_vector[0] is not None:
             geo.angles = angle_vector
         else:
-            geo.angles=np.linspace(0, np.pi, angles, endpoint=False) 
+            geo.angles=np.linspace(0, 2*np.pi, angles, endpoint=False) 
         op = ct.make_operator(geo)
         sino = torch.moveaxis(sino, -1, -2)
         return fbp(op, sino[:, 0]).unsqueeze(1)
@@ -1528,7 +1528,7 @@ def validate_average(validation_dataloader, N2I, random=False):
             num_angles = sinos.shape[-1]
             H, W = ims.shape[-2], ims.shape[-1]
 
-            theta = np.linspace(0.0, np.pi, num_angles, endpoint=False)
+            theta = np.linspace(0.0, 2*np.pi, num_angles, endpoint=False)
 
             # -------------------------------------------------
             # Full FDK reconstruction, sample-by-sample.
@@ -1658,7 +1658,7 @@ def validate_P_invariant(validation_dataloader, N2I, random=False, full_size=544
             num_angles = sinos.shape[-1]
             H, W = ims.shape[-2], ims.shape[-1]
 
-            theta = np.linspace(0.0, np.pi, num_angles, endpoint=False)
+            theta = np.linspace(0.0, 2*np.pi, num_angles, endpoint=False)
 
             # -------------------------------------------------
             # Full FDK reconstruction, sample-by-sample.
@@ -1751,7 +1751,7 @@ def validate_P_invariant(validation_dataloader, N2I, random=False, full_size=544
                 # Final FDK from invariant sinogram, sample-by-sample.
                 # full_size is the number of angles after invariant inference.
                 # -------------------------------------------------
-                theta_full = np.linspace(0.0, np.pi, full_size, endpoint=False)
+                theta_full = np.linspace(0.0, 2*np.pi, full_size, endpoint=False)
 
                 final_reco_np = np.zeros(
                     (batch_size, 1, S, S),
@@ -2050,7 +2050,7 @@ def validate_direct(validation_dataloader, N2I):
             S = sinos.shape[-2]
             T = sinos.shape[-1]
 
-            theta = np.linspace(0.0, np.pi, T, endpoint=False)
+            theta = np.linspace(0.0, 2*np.pi, T, endpoint=False)
 
             # -------------------------------------------------
             # Reconstruct full input sinograms sample-by-sample.
