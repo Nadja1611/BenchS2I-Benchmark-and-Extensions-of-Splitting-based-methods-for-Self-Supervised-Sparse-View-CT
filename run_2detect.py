@@ -34,7 +34,7 @@ from scipy.ndimage import gaussian_filter
 from torchvision import transforms
 import gc
 from skimage.metrics import structural_similarity, peak_signal_noise_ratio
-from utils_flexible import * 
+from utils_2detect2 import * 
 from torch.utils.tensorboard import SummaryWriter
 from utils_lodopab import get_images_from_pt
 
@@ -209,7 +209,7 @@ loss_variant = args.loss_variant
 batch_size = args.batch_size
 n_img = args.number_training_imgs
 
-mode = 'mode2'
+mode = 'mode1'
 print('correlated noise ', args.correlated_noise, flush = True)
 print('random and fill', args.random_mask, args.fill_zeros, flush = True)
 
@@ -218,17 +218,17 @@ print('random and fill', args.random_mask, args.fill_zeros, flush = True)
 '>>-------------------------------------------------------------------------<<'
 if args.use_2detect:
 
-    path_sinos = rf"../all_sinograms_{mode}"
+    path_sinos = rf"../data_2detect_{mode}/all_sinograms_{mode}"
     sinograms = load_sinograms_to_tensor(path_sinos, nr_angles = args.angles)
     sinograms = sinograms.unsqueeze(1)
     print(sinograms.shape, flush = True)
-    sinograms_test = sinograms[800:]
-    sinograms = sinograms[:800]
+    sinograms_test = sinograms[950:]
+    sinograms = sinograms[:100]
 
-    path_reco = rf"../all_reconstructions_{mode}"
+    path_reco = rf"../data_2detect_{mode}/all_reconstructions_{mode}"
     images = load_reconstructions_to_tensor(path_reco)
-    images_training = images[:800]
-    images_test = images[800:]
+    images_training = images[:100]
+    images_test = images[950:]
     print('NR of images ', images_training.shape, images_test.shape, flush = True)
 
     del(images)
@@ -516,17 +516,17 @@ for epoch in range(N_epochs):
         max_psnr_ii = max(max_psnr_ii, mean_psnr_ii)
         
         # -------- Save best models --------
-        if epoch > 1000 and mean_ssim_p2p > old_ssim_p2p:
+        if epoch > 10 and mean_ssim_p2p > old_ssim_p2p:
             old_ssim_p2p = mean_ssim_p2p
             torch.save(N2I.net_denoising.state_dict(),
                     os.path.join(weights_dir, f"p2p_best_ssim_{epoch}.pth"))
 
-        if epoch > 1000 and mean_ssim_s2i > old_ssim_s2i:
+        if epoch > 10 and mean_ssim_s2i > old_ssim_s2i:
             old_ssim_s2i = mean_ssim_s2i
             torch.save(N2I.net_denoising.state_dict(),
                     os.path.join(weights_dir, f"s2i_best_ssim_{epoch}.pth"))
             
-        if epoch > 1000 and mean_ssim_ii > old_ssim_ii:
+        if epoch > 00 and mean_ssim_ii > old_ssim_ii:
             old_ssim_ii = mean_ssim_ii
             torch.save(N2I.net_denoising.state_dict(),
                     os.path.join(weights_dir, f"ii_best_ssim_{epoch}.pth"))    
@@ -591,7 +591,7 @@ for epoch in range(N_epochs):
                 [Ims[0], full_recos[0, 0], Recos[0, 0]],
                 ["Ground Truth", "Final Reconstruction", "Input"]
             ):
-                im = ax.imshow(img.detach().cpu(), cmap="gray")
+                im = ax.imshow(img.detach().cpu(), cmap="gray", vmin=0, vmax = 1)
                 ax.set_title(f"{name} - {title}")
                 ax.axis("off")
 
