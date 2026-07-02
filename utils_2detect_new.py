@@ -1234,7 +1234,6 @@ class Sparse2Inverse_p2p:
 
 
 
-    
 
 
 
@@ -1298,8 +1297,6 @@ class Sparse2Inverse_ds_all_combinations:
             return output_denoising, output_denoising_sino, angles, angles_old
 
     
-
-
 
     def prepare_batch(self, sinograms, iteration_theta, iteration_s):
 
@@ -1382,14 +1379,16 @@ class Sparse2Inverse_ds_all_combinations:
         # =========================================================
         theta = -np.linspace(0.0, 2*np.pi, T, endpoint=False)+np.pi
 
+
+
         for i in range(B):
-            reco_theta[i, 0] = self.fbp_tomosipo(
+            reco_theta[i, 0] = self.fdk_tomosipo(
                 sino_theta[i:i+1].detach().cpu().contiguous(),
                 angle_vector=theta,
                 folds=self.folds,
             )
 
-            reco_s[i, 0] = self.fbp_tomosipo(
+            reco_s[i, 0] = self.fdk_tomosipo(
                 sino_s[i:i+1].detach().cpu().contiguous(),
                 angle_vector=theta,
                 folds=self.folds,
@@ -1398,7 +1397,7 @@ class Sparse2Inverse_ds_all_combinations:
         # target (full)
         target_reco = np.zeros((B, 1, S, S))
         for i in range(B):
-            target_reco[i, 0] = self.fbp_tomosipo(
+            target_reco[i, 0] = self.fdk_tomosipo(
                 sinograms[i:i+1].detach().cpu().contiguous(),
                 angle_vector=theta,
                 folds=self.folds,
@@ -1429,7 +1428,7 @@ class Sparse2Inverse_ds_all_combinations:
             for j in range(1):
                 I = sinograms[i,j].cpu()
                 ### input of fbp should have shape [1,1, s, theta]
-                reconstructions[i, j] = self.fbp_tomosipo(
+                reconstructions[i, j] = self.fdk_tomosipo(
                     torch.tensor(I.unsqueeze(0).unsqueeze(0)),
                     angle_vector=theta,
                     folds=1,
@@ -1440,41 +1439,52 @@ class Sparse2Inverse_ds_all_combinations:
             sinograms,
         )
 
+
+
+
     def projection_tomosipo(self, img, sino, invariant_inference=False):
         """Compute tomographic projection."""
         angles = sino if isinstance(sino, int) else sino.shape[-1]
-        geo = ctgeo.Geometry.parallel_default_parameters(
-            image_shape=(sino.shape[0], 956, 956)
-        )
+      #  geo = ctgeo.Geometry.parallel_default_parameters(
+        #    image_shape=(sino.shape[0], 956, 956)
+       # )
+        geo = get_default_geometry()
+
+        
         if invariant_inference == False:
             geo.angles=-np.linspace(0, 2*np.pi, angles, endpoint=False)+np.pi
-            op = to_autograd(ct.make_operator(geo),num_extra_dims = 1, is_2d = True)
+            #geo.image_shape = (sino.shape[0], 956, 956)
+            op = to_autograd(make_operator(geo),num_extra_dims = 1, is_2d = True)
             sino = op(img[:, 0].to(self.device)).unsqueeze(1)
         else:
             geo.angles=-np.linspace(0, 2*np.pi, 544, endpoint=False)+np.pi
+            #geo.image_shape = (sino.shape[0], 956, 956)
+
             angles_old = -np.linspace(0, 2*np.pi, angles, endpoint=False)+np.pi
-            op = to_autograd(ct.make_operator(geo),num_extra_dims = 1, is_2d = True)
+            op = to_autograd(make_operator(geo),num_extra_dims = 1, is_2d = True)
             sino = op(img[:, 0].to(self.device)).unsqueeze(1)
 
         if invariant_inference == False:
             return torch.moveaxis(sino, -1, -2)
         else:
             return torch.moveaxis(sino, -1, -2), angles_old, geo.angles
-            
 
-    def fbp_tomosipo(self, sino, angle_vector=None, folds=None):
+    def fdk_tomosipo(self, sino, angle_vector=None, folds=None):
         """Perform filtered back-projection reconstruction."""
         angles = sino.shape[-1]
-        geo = ctgeo.Geometry.parallel_default_parameters(
-            image_shape=(sino.shape[0], 956, 956),
-        )     
+        geo = get_default_geometry()
+
         if angle_vector is not None and angle_vector[0] is not None:
             geo.angles = angle_vector
+            geo.image_shape = (sino.shape[0], 956, 956)
+
         else:
             geo.angles=-np.linspace(0, 2*np.pi, angles, endpoint=False)+np.pi 
+            geo.image_shape = (sino.shape[0], 956, 956)
+
         op = ct.make_operator(geo)
         sino = torch.moveaxis(sino, -1, -2)
-        return fbp(op, sino[:, 0]).unsqueeze(1)
+        return fdk(op, sino[:, 0]).unsqueeze(1)
 
 
     def interpolate_mask_new(self, tensor, mask, mask_inv, iteration, direction):
@@ -1823,200 +1833,108 @@ def validate_P_invariant(validation_dataloader, N2I, random=False, full_size=544
 
     return full_recos, MSEs, Ims, Recos
 
-
-def validate_P_invariant_doublesplit(validation_dataloader, N2I, random=False, full_size = 544):
+def validate_average_ds(validation_dataloader, N2I, random=False):
     full_recos = []
     MSEs = []
     Ims = []
     Recos = []
 
-    grid_sizes = N2I.grid_size
-    if isinstance(grid_sizes, int):
-        grid_sizes = [grid_sizes]
+    random_partitioning = N2I.random
+    N2I.random = False  # ensure deterministic partitioning during validation
 
-    plotted_masked = False
-    plotted_final = False
-
-    with torch.no_grad():
-        for sinos, ims in validation_dataloader:
-            
-            sinos = sinos.to(N2I.device)
-            ims = ims.to(N2I.device)
-            recos_given = N2I.fdk_tomosipo(sinos)
-
-            batch_size = sinos.shape[0]
-            H, W = ims.shape[-2], ims.shape[-1]
-            num_angles = sinos.shape[-1]
-
-            final_recos_all_grids = []
-
-            for g in grid_sizes:
-                N2I.grid_size = g        # override here
-
-                num_splits = g ** 2
-
-                final_sino = None
-                mask_sum = torch.zeros((sinos.shape[0],1,956,full_size)).to(sinos.device)
-                # =====================================
-                # loop over Sparse2Inverse partitions
-                # =====================================
-                for iteration in range(num_splits):
-
-                    reco_theta, reco_s, sinos_masked, _, mask_theta, mask_s = N2I.prepare_batch(
-                        sinos.cpu(), iteration, iteration
-                    )
-                    
-                    reco_theta = reco_theta.to(N2I.device)
-
-                    reco_s = reco_s.to(N2I.device)
-
-                    # θ-direction pass
-                    _, output_sino_theta, ang, old_ang = N2I.forward(reco_theta, sinos_masked, invariant_inference = True)
-
-                    # s-direction pass
-                    _, output_sino_s, ang, old_ang = N2I.forward(reco_s, sinos_masked, invariant_inference = True)
-
-
-                    
-                  # Assuming mask has shape [1, H, W_orig] and we want W_new = 544
-                    B, H, W_orig = mask_theta.shape
-                    W_new = 544
-                    expand_factor = W_new // W_orig  # e.g., 544 / 16 = 34
-
-                    mask_big = torch.ones(1,956,full_size)  # [B, H, W_new]
-                    mask_big_s = torch.ones(1,956,full_size)  # [B, H, W_new]
-
-                    for i in range(W_orig):
-                        mask_big[:,:,i*expand_factor] = (mask_theta[:,:,i])
-                        
-                    for i in range(W_orig):
-                        mask_big_s[:,:,i*expand_factor] = (mask_s[:,:,i])
-                    # average both directions and partitions
-                    
-                    sino_ds = (output_sino_theta * mask_big.to(output_sino_theta.device) + output_sino_s * mask_big_s.to(output_sino_s.device)) 
-                    
-
-                    
-                    mask = mask_big.to(sino_ds.device) + mask_big_s.to(sino_ds.device)
-
-
-                   # print(mask.shape, output_sino.shape, flush = True)
-                    if mask.dim() == 3:
-                        mask = mask.unsqueeze(0)
-
-
-                    if final_sino is None:
-                        final_sino = torch.zeros_like(sino_ds)
-
-                    final_sino += sino_ds   
-                    mask_sum += mask
-
-
-                final_reco = N2I.fdk_tomosipo(final_sino/mask_sum)
-                
-                
-                mask = create_circular_mask( final_reco.shape[-2],  final_reco.shape[-2], final_reco.shape[-2]//2)
-                mask_tensor = torch.from_numpy(mask)
-                final_reco = apply_mask(final_reco.detach().cpu(), mask_tensor).to(N2I.device)
-                
-                final_recos_all_grids.append(final_reco)
-                
-           # print("Mask sum unique values:", torch.unique(mask_sum), flush=True)
-            
-            final_recos = torch.stack(final_recos_all_grids, dim=0).mean(dim=0)
-
-            full_recos.append(final_recos)
-            Ims.append(ims)
-            Recos.append(recos_given)
-
-            err = torch.mean(
-                torch.mean((final_recos.squeeze(1) - ims) ** 2, dim=-1),
-                dim=-1,
-            )
-            MSEs.append(err)
-
-    N2I.grid_size = grid_sizes if len(grid_sizes) > 1 else grid_sizes[0]
-
-    full_recos = torch.cat(full_recos, dim=0)
-    Ims = torch.cat(Ims, dim=0)
-    Recos = torch.cat(Recos, dim=0)
-    MSEs = torch.cat(MSEs, dim=0)
-
-    return full_recos, MSEs, Ims, Recos
-
-
-
-
-
-
-
-
-
-
-
-
-#### -----validate average inference stragey for S2I ds------ #######
-
-def validate_average_ds(validation_dataloader, N2I, interpolate=True):
-    full_recos = []
-    MSEs = []
-    Ims = []
-    Recos = []
-    N2I.random = False
     # normalize grid_size
     grid_sizes = N2I.grid_size
     if isinstance(grid_sizes, int):
         grid_sizes = [grid_sizes]
-        
-        
+
     with torch.no_grad():
         for sinos, ims in validation_dataloader:
+            # Expected layout: [B, 1, S, T]
             sinos = sinos.to(N2I.device)
             ims = ims.to(N2I.device)
 
-            # Baseline reconstruction (full sinogram)
-            recos_given = N2I.fdk_tomosipo(sinos)
-
             batch_size = sinos.shape[0]
+            S = sinos.shape[-2]
+            num_angles = sinos.shape[-1]
             H, W = ims.shape[-2], ims.shape[-1]
 
-            final_recos = torch.zeros(
-                (batch_size, 1, H, W),
-                device=N2I.device
+            theta = -np.linspace(0.0, 2*np.pi, num_angles, endpoint=False) + np.pi
+
+            # -------------------------------------------------
+            # Full FDK reconstruction, sample-by-sample.
+            # -------------------------------------------------
+            recos_given_np = np.zeros((batch_size, 1, S, S), dtype=np.float32)
+
+            for i in range(batch_size):
+                I = sinos[i, 0].detach().cpu().clone().contiguous()  # [S, T]
+
+                reco_i = N2I.fdk_tomosipo(
+                    I.unsqueeze(0).unsqueeze(0),  # [1, 1, S, T]
+                    angle_vector=theta,
+                    folds=N2I.folds,
+                )
+
+                recos_given_np[i, 0] = reco_i[0, 0].detach().cpu().numpy()
+
+            recos_given = torch.from_numpy(recos_given_np).float().to(N2I.device)
+
+            mask = create_circular_mask(
+                recos_given.shape[-2],
+                recos_given.shape[-2],
+                recos_given.shape[-2] // 2 - 10
             )
+            recos_given *= torch.from_numpy(mask).to(
+                device=recos_given.device,
+                dtype=recos_given.dtype
+            )
+
             final_recos_all_grids = []
+
             # ---------- LOOP OVER GRID SIZES ----------
             for g in grid_sizes:
-                N2I.grid_size = g        # override here
+                N2I.grid_size = g
 
                 num_splits = g ** 2
-                # =====================================
-                # loop over Sparse2Inverse partitions
-                # =====================================
-                for iteration in range(num_splits):
+                assert num_angles >= num_splits
 
-                    reco_theta, reco_s, _, _, _, _ = N2I.prepare_batch(
+                final_recos = torch.zeros(
+                    (batch_size, 1, H, W),
+                    device=N2I.device,
+                    dtype=ims.dtype,
+                )
+
+                # ---------- LOOP OVER PARTITIONS ----------
+                for iteration in range(num_splits):
+                    reco_theta, reco_s, sinos_masked, _, _, _ = N2I.prepare_batch(
                         sinos.cpu(), iteration, iteration
                     )
 
                     reco_theta = reco_theta.to(N2I.device)
                     reco_s = reco_s.to(N2I.device)
+                    sinos_masked = sinos_masked.to(N2I.device)  # Keep sparse layout intact
 
-                    # θ-direction pass
-                    out_theta, _ = N2I.forward(
-                        reco_theta,
-                        sinos
+                    # Dual-direction pass (fixed: passing matching sparse mask tracking tensor)
+                    output_reco_theta, _ = N2I.forward(reco_theta, sinos_masked)
+                    output_reco_s, _ = N2I.forward(reco_s, sinos_masked)
+                    
+                    # Blend the structural passes together 
+                    output_reco = 0.5 * (output_reco_theta + output_reco_s)
+
+                    mask_circ = create_circular_mask(
+                        output_reco.shape[-2],
+                        output_reco.shape[-2],
+                        output_reco.shape[-2] // 2
                     )
+                    mask_tensor = torch.from_numpy(mask_circ)
 
-                    # s-direction pass
-                    out_s, _ = N2I.forward(
-                        reco_s,
-                        sinos
-                    )
+                    output_reco = apply_mask(
+                        output_reco.detach().cpu(),
+                        mask_tensor
+                    ).to(N2I.device)
 
-                    # average both directions and partitions
-                    final_recos += 0.5 * (out_theta + out_s) / num_splits
-                    final_recos_all_grids.append(final_recos)
+                    final_recos += output_reco / num_splits
+
+                final_recos_all_grids.append(final_recos)
 
             # ---------- AVERAGE OVER GRID SIZES ----------
             final_recos = torch.stack(final_recos_all_grids, dim=0).mean(dim=0)
@@ -2031,17 +1949,187 @@ def validate_average_ds(validation_dataloader, N2I, interpolate=True):
             )
             MSEs.append(err)
 
-    # restore original grid_size
     N2I.grid_size = grid_sizes if len(grid_sizes) > 1 else grid_sizes[0]
+    N2I.random = random_partitioning
 
     full_recos = torch.cat(full_recos, dim=0)
     Ims = torch.cat(Ims, dim=0)
     Recos = torch.cat(Recos, dim=0)
     MSEs = torch.cat(MSEs, dim=0)
-    N2I.random = False
+
     return full_recos, MSEs, Ims, Recos
 
+def validate_P_invariant_doublesplit(validation_dataloader, N2I, random=False, full_size=544):
+    full_recos = []
+    MSEs = []
+    Ims = []
+    Recos = []
 
+    random_partitioning = N2I.random
+    N2I.random = False  # ensure deterministic partitioning during validation
+
+    grid_sizes = N2I.grid_size
+    if isinstance(grid_sizes, int):
+        grid_sizes = [grid_sizes]
+
+    with torch.no_grad():
+        for sinos, ims in validation_dataloader:
+            # Expected layout: [B, 1, S, T]
+            sinos = sinos.to(N2I.device)
+            ims = ims.to(N2I.device)
+
+            batch_size = sinos.shape[0]
+            S = sinos.shape[-2]
+            num_angles = sinos.shape[-1]
+            H, W = ims.shape[-2], ims.shape[-1]
+
+            theta = -np.linspace(0.0, 2*np.pi, num_angles, endpoint=False) + np.pi
+
+            # -------------------------------------------------
+            # Full FDK reconstruction, sample-by-sample.
+            # -------------------------------------------------
+            recos_given_np = np.zeros((batch_size, 1, S, S), dtype=np.float32)
+
+            for i in range(batch_size):
+                I = sinos[i, 0].detach().cpu().clone().contiguous()  # [S, T]
+
+                reco_i = N2I.fdk_tomosipo(
+                    I.unsqueeze(0).unsqueeze(0),  # [1, 1, S, T]
+                    angle_vector=theta,
+                    folds=N2I.folds,
+                )
+
+                recos_given_np[i, 0] = reco_i[0, 0].detach().cpu().numpy()
+
+            recos_given = torch.from_numpy(recos_given_np).float().to(N2I.device)
+
+            final_recos_all_grids = []
+
+            # ---------- LOOP OVER GRID SIZES ----------
+            for g in grid_sizes:
+                N2I.grid_size = g
+
+                num_splits = g ** 2
+                assert num_angles >= num_splits
+
+                final_sino = None
+                mask_sum = torch.zeros(
+                    (batch_size, 1, S, full_size),
+                    device=sinos.device,
+                    dtype=sinos.dtype,
+                )
+
+                # ---------- LOOP OVER PARTITIONS ----------
+                for iteration in range(num_splits):
+                    reco_theta, reco_s, sinos_masked, _, mask_theta, mask_s = N2I.prepare_batch(
+                        sinos.cpu(), iteration, iteration
+                    )
+
+                    reco_theta = reco_theta.to(N2I.device)
+                    reco_s = reco_s.to(N2I.device)
+                    sinos_masked = sinos_masked.to(N2I.device)
+
+                    # θ-direction pass
+                    _, output_sino_theta, ang, old_ang = N2I.forward(
+                        reco_theta,
+                        sinos_masked,
+                        invariant_inference=True
+                    )
+
+                    # s-direction pass
+                    _, output_sino_s, ang, old_ang = N2I.forward(
+                        reco_s,
+                        sinos_masked,
+                        invariant_inference=True
+                    )
+
+                    # mask shapes: [1, S, W_orig]
+                    _, mask_S, W_orig = mask_theta.shape
+                    expand_factor = full_size // W_orig
+
+                    mask_big_theta = torch.ones((1, S, full_size), dtype=mask_theta.dtype)
+                    mask_big_s = torch.ones((1, S, full_size), dtype=mask_s.dtype)
+
+                    for i in range(W_orig):
+                        mask_big_theta[:, :, i * expand_factor] = mask_theta[:, :, i]
+                        mask_big_s[:, :, i * expand_factor] = mask_s[:, :, i]
+
+                    mask_big_theta = mask_big_theta.to(device=output_sino_theta.device, dtype=output_sino_theta.dtype)
+                    mask_big_s = mask_big_s.to(device=output_sino_s.device, dtype=output_sino_s.dtype)
+
+                    if mask_big_theta.dim() == 3:
+                        mask_big_theta = mask_big_theta.unsqueeze(0)  # [1, 1, S, full_size]
+                    if mask_big_s.dim() == 3:
+                        mask_big_s = mask_big_s.unsqueeze(0)
+
+                    # Accumulate joint channels
+                    output_sino_J = (output_sino_theta * mask_big_theta) + (output_sino_s * mask_big_s)
+                    mask_comb = mask_big_theta + mask_big_s
+
+                    if final_sino is None:
+                        final_sino = torch.zeros_like(output_sino_J)
+
+                    final_sino += output_sino_J
+                    mask_sum += mask_comb
+
+                # Safe non-zero division element selection matching single-split structure safely
+                averaged_sino = torch.where(mask_sum > 0, final_sino / mask_sum, torch.zeros_like(final_sino))
+
+                # -------------------------------------------------
+                # Final FDK from invariant sinogram, sample-by-sample.
+                # -------------------------------------------------
+                theta_full = -np.linspace(0.0, 2*np.pi, full_size, endpoint=False) + np.pi
+
+                final_reco_np = np.zeros((batch_size, 1, S, S), dtype=np.float32)
+
+                for i in range(batch_size):
+                    I = averaged_sino[i, 0].detach().cpu().clone().contiguous()
+
+                    reco_i = N2I.fdk_tomosipo(
+                        I.unsqueeze(0).unsqueeze(0),  # [1, 1, S, full_size]
+                        angle_vector=theta_full,
+                        folds=N2I.folds,
+                    )
+
+                    final_reco_np[i, 0] = reco_i[0, 0].detach().cpu().numpy()
+
+                final_reco = torch.from_numpy(final_reco_np).float().to(N2I.device)
+
+                mask = create_circular_mask(
+                    final_reco.shape[-2],
+                    final_reco.shape[-2],
+                    final_reco.shape[-2] // 2
+                )
+                mask_tensor = torch.from_numpy(mask)
+
+                final_reco = apply_mask(
+                    final_reco.detach().cpu(),
+                    mask_tensor
+                ).to(N2I.device)
+
+                final_recos_all_grids.append(final_reco)
+
+            final_recos = torch.stack(final_recos_all_grids, dim=0).mean(dim=0)
+
+            full_recos.append(final_recos)
+            Ims.append(ims)
+            Recos.append(recos_given)
+
+            err = torch.mean(
+                torch.mean((final_recos.squeeze(1) - ims) ** 2, dim=-1),
+                dim=-1,
+            )
+            MSEs.append(err)
+
+    N2I.grid_size = grid_sizes if len(grid_sizes) > 1 else grid_sizes[0]
+    N2I.random = random_partitioning
+
+    full_recos = torch.cat(full_recos, dim=0)
+    Ims = torch.cat(Ims, dim=0)
+    Recos = torch.cat(Recos, dim=0)
+    MSEs = torch.cat(MSEs, dim=0)
+
+    return full_recos, MSEs, Ims, Recos
 
 
 #### -----validate with strategy of Proj2Proj ------ #######
